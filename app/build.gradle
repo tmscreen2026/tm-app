@@ -7,7 +7,7 @@ android {
     compileSdk 33
 
     defaultConfig {
-        applicationId "com.tm.app2"
+        applicationId "com.tm.app"
         minSdk 24
         targetSdk 33
         versionCode 1
