@@ -1,9 +1,6 @@
 package com.tm.app;
 
 import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -15,7 +12,6 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
@@ -34,10 +30,7 @@ import java.util.Locale;
 
 public class TMService extends Service {
 
-    private static final String CHANNEL_ID = "tm_channel";
-    private static final int NOTIF_ID = 1;
     private static final String SERVER = "http://127.0.0.1:8765";
-    private static final long INTERVAL_MS = 3000;
 
     private MediaProjection mediaProjection;
     private ImageReader imageReader;
@@ -48,28 +41,24 @@ public class TMService extends Service {
     private int screenDpi;
 
     private volatile boolean busy = false;
-    private volatile boolean stopped = false;
     private long lastSent = 0;
     private String lastText = "";
     private int savedCount = 0;
     private int lastHash = 0;
 
     @Override
-    public void onCreate() {
-        super.onCreate();
-        createChannel();
-    }
-
-    @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-
         if (intent != null && "STOP".equals(intent.getAction())) {
-            stopped = true;
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        startForeground(NOTIF_ID, buildNotification("TM running"));
+        Notification.Builder b = new Notification.Builder(this);
+        b.setContentTitle("TM");
+        b.setContentText("TM running");
+        b.setSmallIcon(android.R.drawable.ic_menu_camera);
+        b.setOngoing(true);
+        startForeground(1, b.build());
 
         if (intent != null && intent.hasExtra("resultCode")) {
             int resultCode = intent.getIntExtra("resultCode", 0);
@@ -109,14 +98,14 @@ public class TMService extends Service {
             new ImageReader.OnImageAvailableListener() {
                 @Override
                 public void onImageAvailable(ImageReader reader) {
-                    if (stopped || busy) {
+                    if (busy) {
                         Image img = reader.acquireLatestImage();
                         if (img != null) img.close();
                         return;
                     }
 
                     long now = System.currentTimeMillis();
-                    if (now - lastSent < INTERVAL_MS) {
+                    if (now - lastSent < 5000) {
                         Image img = reader.acquireLatestImage();
                         if (img != null) img.close();
                         return;
@@ -184,7 +173,7 @@ public class TMService extends Service {
             if (scaled != bmp) bmp.recycle();
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            scaled.compress(Bitmap.CompressFormat.JPEG, 50, baos);
+            scaled.compress(Bitmap.CompressFormat.JPEG, 60, baos);
             scaled.recycle();
 
             final byte[] imgBytes = baos.toByteArray();
@@ -224,7 +213,6 @@ public class TMService extends Service {
                         lastText = text;
                         saveText(text);
                     } catch (Exception e) {
-                        // ignore
                     } finally {
                         if (conn != null) conn.disconnect();
                         busy = false;
@@ -242,10 +230,8 @@ public class TMService extends Service {
             if (!dir.exists()) dir.mkdirs();
 
             Date now = new Date();
-            String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                .format(now);
-            String header = "[" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-                .format(now) + "]\n";
+            String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(now);
+            String header = "[" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(now) + "]\n";
             File out = new File(dir, ts + ".txt");
 
             FileOutputStream fos = new FileOutputStream(out);
@@ -253,55 +239,13 @@ public class TMService extends Service {
             fos.close();
 
             savedCount++;
-            updateNotification("Saved " + savedCount + " - tap Stop to end");
         } catch (Exception e) {
-            // ignore
         }
-    }
-
-    private void createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "TM Service",
-                NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("TM screen capture service");
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            nm.createNotificationChannel(ch);
-        }
-    }
-
-    private Notification buildNotification(String text) {
-        Intent stopIntent = new Intent(this, TMService.class);
-        stopIntent.setAction("STOP");
-        PendingIntent stopPi = PendingIntent.getService(
-            this, 0, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT);
-
-        Notification.Builder b;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            b = new Notification.Builder(this, CHANNEL_ID);
-        } else {
-            b = new Notification.Builder(this);
-        }
-        return b.setContentTitle("TM")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setOngoing(true)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel,
-                           "Stop", stopPi)
-                .build();
-    }
-
-    private void updateNotification(String text) {
-        NotificationManager nm = (NotificationManager)
-            getSystemService(NOTIFICATION_SERVICE);
-        nm.notify(NOTIF_ID, buildNotification(text));
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        stopped = true;
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (mediaProjection != null) mediaProjection.stop();
